@@ -17,3 +17,8 @@ uv run pytest -n auto
 uv run ruff check src/plots.py tests
 uv run ty check src/plots.py tests
 ```
+
+## License
+
+This project is licensed under the GNU Lesser General Public License, version 3.
+See [`LICENSE.txt`](LICENSE.txt) for the full license text.
