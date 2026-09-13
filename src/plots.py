@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
 """Create reusable survey diagnostic plots.
 
 - Plot observation counts by sample unit and survey wave.
@@ -6,75 +7,199 @@
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
+from enum import StrEnum
 import logging
 from pathlib import Path
 from textwrap import fill
-from typing import Literal
+from typing import Literal, TypedDict
 
+from matplotlib import RcParams
 from matplotlib.axes import Axes
-from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
+from matplotlib.dates import AutoDateLocator, ConciseDateFormatter, date2num
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter, MaxNLocator, StrMethodFormatter
+from matplotlib.ticker import (
+    FixedLocator,
+    FuncFormatter,
+    MaxNLocator,
+    StrMethodFormatter,
+)
+from matplotlib.typing import ColorType, LineStyleType, MarkerType
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+__all__ = [
+    "OutlierMethod",
+    "OutlierTail",
+    "plot_nobs_by_id",
+    "plot_nobs_by_wave",
+    "plot_stats_by_wave",
+]
+
+
+class _LineStyle(TypedDict, total=False):
+    color: ColorType
+    linestyle: LineStyleType | None
+    linewidth: float
+    marker: MarkerType | None
+    markersize: float
+    alpha: float
+    zorder: float
+
+
+class _FillStyle(TypedDict, total=False):
+    color: ColorType
+    alpha: float
+    linewidth: float
+
+
+class _PatchStyle(TypedDict, total=False):
+    facecolor: ColorType
+    edgecolor: ColorType
+    alpha: float
+
+
+class _HistogramStyle(TypedDict, total=False):
+    color: ColorType
+    edgecolor: ColorType
+    linewidth: float
+    rwidth: float
+
+
+class _GridStyle(TypedDict, total=False):
+    color: ColorType
+    linestyle: LineStyleType
+
+
+class _TextStyle(TypedDict, total=False):
+    fontsize: float
+    fontweight: str
+    fontstyle: str
+    ha: str
+    va: str
+
+
+class _TickStyle(TypedDict, total=False):
+    labelsize: float
+    labelrotation: float
+
+
+class _LegendStyle(TypedDict, total=False):
+    loc: Literal["upper left"]
+    frameon: bool
+    fontsize: float
+
+
 FIGURE_WIDTH = 16.2
 ROW_HEIGHT = 2.835
 NCOLS = 5
-FONT_FAMILY = "serif"
-FIGURE_TITLE_SIZE = 14
-FIGURE_TITLE_WEIGHT = "bold"
-FIGURE_TITLE_STYLE = "italic"
-AXIS_LABEL_SIZE = 11
-TICK_LABEL_SIZE = 10
-VARIABLE_LABEL_SIZE = 11
-VARIABLE_LABEL_STYLE = "italic"
 VARIABLE_LABEL_X = 0.02
 VARIABLE_LABEL_Y = 0.98
 VARIABLE_LABEL_WRAP_WIDTH = 38
 MAX_X_TICKS = 5
+MAX_NOBS_BY_ID_TICKS = 10
 MAX_Y_TICKS = 5
-X_MARGIN = 0.0
+X_MARGIN = 0.025
 Y_MARGIN = 0.05
 TOP_Y_MARGIN = 0.05
 INDICATOR_LOWER_MARGIN = 0.05
 INDICATOR_UPPER_MARGIN = 0.05
+INDICATOR_FULL_RANGE_THRESHOLD = 0.5
 CATEGORICAL_MARGIN = 0.25
-GRID_COLOR = "grey"
-GRID_LINESTYLE = ":"
-COUNT_COLOR = "steelblue"
-COUNT_LINE_WIDTH = 1.0
-HISTOGRAM_EDGE_COLOR = "white"
-HISTOGRAM_LINE_WIDTH = 0.4
-HISTOGRAM_RELATIVE_WIDTH = 0.9
-MEDIAN_COLOR = "steelblue"
-MEAN_COLOR = "black"
-MEDIAN_LINE_WIDTH = 1.0
-MEAN_LINE_WIDTH = 0.75
-MEDIAN_ALPHA = 0.8
-MEAN_ALPHA = 0.7
-MEDIAN_ZORDER = 50
-MEAN_ZORDER = 100
-STATISTIC_MARKER: str | None = None
-MARKER_SIZE = 4.0
-IQR_COLOR = "steelblue"
-IQR_ALPHA = 0.25
-IQR_LINE_WIDTH = 0.0
-LEGEND_LOCATION = "upper left"
-LEGEND_FRAME = False
-DATE_MIN_TICKS = 3
-DATE_MAX_TICKS = 5
+DATE_MIN_TICKS = 5
+DATE_MAX_TICKS = 8
 OUTLIER_TAIL_FRACTION = 0.01
 OUTLIER_IQR_FACTOR = 100.0
 
+RC_STYLE = RcParams({"font.family": "serif"})
+FIGURE_TITLE_STYLE: _TextStyle = {
+    "fontsize": 14,
+    "fontweight": "bold",
+    "fontstyle": "italic",
+}
+AXIS_LABEL_STYLE: _TextStyle = {"fontsize": 11}
+TICK_STYLE: _TickStyle = {"labelsize": 9}
+XTICK_STYLE: _TickStyle = TICK_STYLE | {"labelrotation": 0}
+YTICK_STYLE: _TickStyle = TICK_STYLE | {"labelrotation": 90}
+VARIABLE_LABEL_STYLE: _TextStyle = {
+    "ha": "left",
+    "va": "top",
+    "fontsize": 10,
+    "fontstyle": "italic",
+}
+GRID_STYLE: _GridStyle = {
+    "color": "grey",
+    "linestyle": ":",
+}
+STATISTIC_LINE_STYLE: _LineStyle = {
+    "marker": None,
+    "markersize": 3.0,
+    "linewidth": 1.0,
+}
+COUNT_LINE_STYLE: _LineStyle = STATISTIC_LINE_STYLE | {
+    "color": "steelblue",
+    "linewidth": 1.25,
+}
+HISTOGRAM_STYLE: _HistogramStyle = {
+    "color": "steelblue",
+    "edgecolor": "white",
+    "linewidth": 0.4,
+    "rwidth": 0.9,
+}
+MEDIAN_LINE_STYLE: _LineStyle = STATISTIC_LINE_STYLE | {
+    "color": "steelblue",
+}
+MEDIAN_STYLE: _LineStyle = MEDIAN_LINE_STYLE | {
+    "alpha": 0.8,
+    "zorder": 50,
+}
+MEAN_LINE_STYLE: _LineStyle = STATISTIC_LINE_STYLE | {
+    "color": "black",
+}
+MEAN_STYLE: _LineStyle = MEAN_LINE_STYLE | {
+    "alpha": 0.7,
+    "zorder": 100,
+}
+IQR_STYLE: _FillStyle = {
+    "color": "steelblue",
+    "alpha": 0.25,
+    "linewidth": 0.0,
+}
+IQR_LEGEND_STYLE: _PatchStyle = {
+    "facecolor": "steelblue",
+    "edgecolor": "none",
+    "alpha": 0.25,
+}
+LEGEND_STYLE: _LegendStyle = {
+    "loc": "upper left",
+    "frameon": False,
+    "fontsize": 10,
+}
+
+
+class OutlierMethod(StrEnum):
+    """Method for excluding outliers from wave means."""
+
+    NONE = "none"
+    QUANTILE = "quantile"
+    IQR = "iqr"
+
+
+class OutlierTail(StrEnum):
+    """Tail rule used to identify outliers."""
+
+    AUTO = "auto"
+    NONE = "none"
+    UPPER = "upper"
+    LOWER = "lower"
+    TWO_SIDED = "two-sided"
+
 
 type PanelPlotter = Callable[[Axes, str], None]
-type OutlierMethod = Literal["none", "quantile", "iqr"]
-type OutlierTails = Literal["auto", "none", "upper", "lower", "two-sided"]
-type OutlierTailConfig = OutlierTails | Mapping[str, OutlierTails]
+type OutlierMethodConfig = OutlierMethod | Mapping[str, OutlierMethod]
+type OutlierTailConfig = OutlierTail | Mapping[str, OutlierTail]
 type VariableLabels = Mapping[str, str]
 type ValueLabelCode = int | float
 type ValueLabels = Mapping[str, Mapping[ValueLabelCode, str]]
@@ -187,7 +312,7 @@ def _weighted_moments(
 def _auto_outlier_tails(
     values: pd.Series,
     value_labels: Mapping[ValueLabelCode, str] | None,
-) -> OutlierTails:
+) -> OutlierTail:
     """Infer applicable tails from metadata, dtype, and observed support."""
     if (
         value_labels
@@ -196,17 +321,27 @@ def _auto_outlier_tails(
         or pd.api.types.is_integer_dtype(values.dtype)
         or _is_indicator(values)
     ):
-        return "none"
+        return OutlierTail.NONE
 
     observed = _as_float_array(values)
     observed = observed[np.isfinite(observed)]
     if observed.size == 0 or (observed.min() >= 0.0 and observed.max() <= 1.0):
-        return "none"
+        return OutlierTail.NONE
     if observed.min() >= 0.0:
-        return "upper"
+        return OutlierTail.UPPER
     if observed.max() <= 0.0:
-        return "lower"
-    return "two-sided"
+        return OutlierTail.LOWER
+    return OutlierTail.TWO_SIDED
+
+
+def _resolve_outlier_method(
+    variable: str,
+    config: OutlierMethodConfig,
+) -> OutlierMethod:
+    """Resolve the mean-trimming method for one variable."""
+    if isinstance(config, Mapping):
+        return config.get(variable, OutlierMethod.NONE)
+    return config
 
 
 def _resolve_outlier_tails(
@@ -214,17 +349,15 @@ def _resolve_outlier_tails(
     variable: str,
     value_labels: ValueLabels | None,
     config: OutlierTailConfig,
-) -> OutlierTails:
+) -> OutlierTail:
     """Resolve an explicit or inferred tail rule for one variable."""
-    tails = config if isinstance(config, str) else config.get(variable, "auto")
-    if tails == "none":
-        return "none"
-    if tails == "upper":
-        return "upper"
-    if tails == "lower":
-        return "lower"
-    if tails == "two-sided":
-        return "two-sided"
+    tails = (
+        config.get(variable, OutlierTail.AUTO)
+        if isinstance(config, Mapping)
+        else config
+    )
+    if tails is not OutlierTail.AUTO:
+        return tails
 
     labels = None if value_labels is None else value_labels.get(variable)
     return _auto_outlier_tails(df_data[variable], labels)
@@ -258,7 +391,7 @@ def _tail_quantile(
 def _quantile_outlier_mask(
     values: npt.NDArray[np.float64],
     weights: npt.NDArray[np.float64] | None,
-    tails: OutlierTails,
+    tails: OutlierTail,
     fraction: float,
 ) -> npt.NDArray[np.bool_]:
     """Identify observations in the configured nonzero distribution tails."""
@@ -267,7 +400,7 @@ def _quantile_outlier_mask(
         valid &= np.isfinite(weights) & (weights > 0.0)
     mask = np.zeros(values.shape, dtype=bool)
 
-    if tails in {"upper", "two-sided"}:
+    if tails in {OutlierTail.UPPER, OutlierTail.TWO_SIDED}:
         selected = valid & (values > 0.0)
         upper = _tail_quantile(
             values[selected],
@@ -276,7 +409,7 @@ def _quantile_outlier_mask(
         )
         mask |= valid & (values > upper)
 
-    if tails in {"lower", "two-sided"}:
+    if tails in {OutlierTail.LOWER, OutlierTail.TWO_SIDED}:
         selected = valid & (values < 0.0)
         lower = _tail_quantile(
             values[selected],
@@ -291,7 +424,7 @@ def _quantile_outlier_mask(
 def _iqr_outlier_mask(
     values: npt.NDArray[np.float64],
     weights: npt.NDArray[np.float64] | None,
-    tails: OutlierTails,
+    tails: OutlierTail,
     factor: float,
 ) -> npt.NDArray[np.bool_]:
     """Identify observations outside the configured interquartile fences."""
@@ -307,9 +440,9 @@ def _iqr_outlier_mask(
     if not np.isfinite(iqr) or iqr <= 0.0:
         return mask
 
-    if tails in {"upper", "two-sided"}:
+    if tails in {OutlierTail.UPPER, OutlierTail.TWO_SIDED}:
         mask |= valid & (values > q3 + factor * iqr)
-    if tails in {"lower", "two-sided"}:
+    if tails in {OutlierTail.LOWER, OutlierTail.TWO_SIDED}:
         mask |= valid & (values < q1 - factor * iqr)
     return mask
 
@@ -319,14 +452,14 @@ def _mean_outlier_mask(
     weights: npt.NDArray[np.float64] | None,
     *,
     method: OutlierMethod,
-    tails: OutlierTails,
+    tails: OutlierTail,
     tail_fraction: float,
     iqr_factor: float,
 ) -> npt.NDArray[np.bool_]:
     """Identify observations excluded from a trimmed mean."""
-    if method == "none" or tails == "none":
+    if method is OutlierMethod.NONE or tails is OutlierTail.NONE:
         return np.zeros(values.shape, dtype=bool)
-    if method == "quantile":
+    if method is OutlierMethod.QUANTILE:
         return _quantile_outlier_mask(values, weights, tails, tail_fraction)
     return _iqr_outlier_mask(values, weights, tails, iqr_factor)
 
@@ -384,7 +517,7 @@ def _stats_by_wave(
     outlier_tails: OutlierTailConfig,
     outlier_tail_fraction: float,
     outlier_iqr_factor: float,
-) -> tuple[pd.DataFrame, int, OutlierTails]:
+) -> tuple[pd.DataFrame, int, OutlierTail]:
     """Calculate wave moments and optionally trim the mean."""
     rows: list[dict[str, object]] = []
     n_masked = 0
@@ -456,8 +589,12 @@ def _style_x_axis(
         ax.set_xticks(np.asarray(ticks, dtype=np.float64))
     elif pd.api.types.is_datetime64_any_dtype(values.dtype):
         locator = AutoDateLocator(minticks=DATE_MIN_TICKS, maxticks=DATE_MAX_TICKS)
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(ConciseDateFormatter(locator))
+        ticks = locator.tick_values(values.min(), values.max())
+        lower, upper = date2num((values.min(), values.max()))
+        ticks = ticks[(ticks >= lower) & (ticks <= upper)]
+        fixed_locator = FixedLocator(ticks)
+        ax.xaxis.set_major_locator(fixed_locator)
+        ax.xaxis.set_major_formatter(ConciseDateFormatter(fixed_locator))
     elif pd.api.types.is_numeric_dtype(values.dtype):
         ax.xaxis.set_major_locator(
             MaxNLocator(
@@ -466,7 +603,7 @@ def _style_x_axis(
                 min_n_ticks=1,
             )
         )
-    ax.tick_params(axis="x", labelrotation=0, labelsize=TICK_LABEL_SIZE)
+    ax.tick_params(axis="x", **XTICK_STYLE)
 
 
 def _add_top_clearance(ax: Axes) -> None:
@@ -487,7 +624,7 @@ def _style_count_axis(ax: Axes) -> None:
         )
     )
     ax.yaxis.set_major_formatter(SuffixFormatter())
-    ax.tick_params(axis="y", labelrotation=90, labelsize=TICK_LABEL_SIZE)
+    ax.tick_params(axis="y", **YTICK_STYLE)
     _add_top_clearance(ax)
 
 
@@ -495,17 +632,23 @@ def _style_stat_axis(
     ax: Axes,
     values: pd.Series,
     *,
+    plotted_range: float,
     value_labels: Mapping[ValueLabelCode, str] | None,
     compact: bool,
 ) -> None:
     """Format an axis displaying descriptive statistics."""
     indicator = _is_indicator(values)
     ax.margins(y=Y_MARGIN)
-    ax.tick_params(axis="y", labelrotation=90, labelsize=TICK_LABEL_SIZE)
+    ax.tick_params(axis="y", **YTICK_STYLE)
 
     if indicator:
-        ax.set_ylim(-INDICATOR_LOWER_MARGIN, 1.0 + INDICATOR_UPPER_MARGIN)
-        ax.set_yticks(np.linspace(0.0, 1.0, MAX_Y_TICKS))
+        if plotted_range > INDICATOR_FULL_RANGE_THRESHOLD:
+            ax.set_ylim(-INDICATOR_LOWER_MARGIN, 1.0 + INDICATOR_UPPER_MARGIN)
+            ax.set_yticks(np.linspace(0.0, 1.0, MAX_Y_TICKS))
+        else:
+            ax.yaxis.set_major_locator(
+                MaxNLocator(nbins=MAX_Y_TICKS - 1, min_n_ticks=1)
+            )
         ax.yaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
     elif value_labels:
         codes = np.array(sorted(value_labels), dtype=np.float64)
@@ -519,10 +662,10 @@ def _style_stat_axis(
             MaxNLocator(
                 nbins=MAX_Y_TICKS - 1,
                 integer=True,
-                min_n_ticks=1,
+                min_n_ticks=2,
             )
         )
-        ax.yaxis.set_major_formatter(StrMethodFormatter("{x:.0f}"))
+        ax.yaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
     else:
         ax.yaxis.set_major_locator(MaxNLocator(nbins=MAX_Y_TICKS - 1, min_n_ticks=1))
 
@@ -538,43 +681,24 @@ def _annotate_panel(ax: Axes, annotation: str) -> None:
         wrapped,
         xy=(VARIABLE_LABEL_X, VARIABLE_LABEL_Y),
         xycoords="axes fraction",
-        ha="left",
-        va="top",
-        fontsize=VARIABLE_LABEL_SIZE,
-        fontstyle=VARIABLE_LABEL_STYLE,
+        **VARIABLE_LABEL_STYLE,
     )
     text.set_in_layout(False)
 
 
-def _draw_descriptive_legend(ax: Axes) -> None:
+def _draw_descriptive_legend(
+    ax: Axes,
+    line_marker: MarkerType | None,
+) -> None:
     """Draw the descriptive-statistics legend in a blank panel."""
+    line_style: _LineStyle = {"marker": line_marker}
     handles = (
-        Line2D(
-            [],
-            [],
-            color=MEDIAN_COLOR,
-            linewidth=MEDIAN_LINE_WIDTH,
-            marker=STATISTIC_MARKER,
-            markersize=MARKER_SIZE,
-        ),
-        Line2D(
-            [],
-            [],
-            color=MEAN_COLOR,
-            linewidth=MEAN_LINE_WIDTH,
-            marker=STATISTIC_MARKER,
-            markersize=MARKER_SIZE,
-        ),
-        Patch(facecolor=IQR_COLOR, alpha=IQR_ALPHA, edgecolor="none"),
+        Line2D([], [], **(MEDIAN_LINE_STYLE | line_style)),
+        Line2D([], [], **(MEAN_LINE_STYLE | line_style)),
+        Patch(**IQR_LEGEND_STYLE),
     )
     ax.set_axis_off()
-    ax.legend(
-        handles,
-        ("Median", "Mean", "IQR"),
-        loc=LEGEND_LOCATION,
-        frameon=LEGEND_FRAME,
-        fontsize=TICK_LABEL_SIZE,
-    )
+    ax.legend(handles, ("Median", "Mean", "IQR"), **LEGEND_STYLE)
 
 
 def _write_grid(
@@ -584,6 +708,7 @@ def _write_grid(
     *,
     suptitle: str,
     descriptive_legend: bool = False,
+    legend_line_marker: MarkerType | None = None,
     xlabel: str | None = None,
     ylabel: str | None = None,
 ) -> Path:
@@ -593,7 +718,7 @@ def _write_grid(
     first = int(descriptive_legend)
     nrows = (len(variables) + first + NCOLS - 1) // NCOLS
 
-    with plt.rc_context({"font.family": FONT_FAMILY}):
+    with plt.rc_context(RC_STYLE):
         fig, axes = plt.subplots(
             nrows,
             NCOLS,
@@ -604,7 +729,7 @@ def _write_grid(
         )
         try:
             if descriptive_legend:
-                _draw_descriptive_legend(axes[0, 0])
+                _draw_descriptive_legend(axes[0, 0], legend_line_marker)
 
             plot_axes = tuple(axes.flat)[first:]
             for ax, variable in zip(plot_axes, variables, strict=False):
@@ -614,15 +739,10 @@ def _write_grid(
                 ax.set_visible(False)
 
             if xlabel is not None:
-                fig.supxlabel(xlabel, fontsize=AXIS_LABEL_SIZE)
+                fig.supxlabel(xlabel, **AXIS_LABEL_STYLE)
             if ylabel is not None:
-                fig.supylabel(ylabel, fontsize=AXIS_LABEL_SIZE)
-            fig.suptitle(
-                suptitle,
-                fontsize=FIGURE_TITLE_SIZE,
-                fontweight=FIGURE_TITLE_WEIGHT,
-                fontstyle=FIGURE_TITLE_STYLE,
-            )
+                fig.supylabel(ylabel, **AXIS_LABEL_STYLE)
+            fig.suptitle(suptitle, **FIGURE_TITLE_STYLE)
             fig.savefig(path)
         finally:
             plt.close(fig)
@@ -676,14 +796,20 @@ def plot_nobs_by_id(
         ax.hist(
             df_nobs[variable].to_numpy(),
             bins=bins.tolist(),
-            color=COUNT_COLOR,
-            linewidth=HISTOGRAM_LINE_WIDTH,
-            rwidth=HISTOGRAM_RELATIVE_WIDTH,
-            edgecolor=HISTOGRAM_EDGE_COLOR,
+            **HISTOGRAM_STYLE,
         )
-        ax.set_xticks(np.arange(nmax + 1))
+        if nmax < MAX_NOBS_BY_ID_TICKS:
+            ax.set_xticks(np.arange(nmax + 1))
+        else:
+            ax.xaxis.set_major_locator(
+                MaxNLocator(
+                    nbins=MAX_NOBS_BY_ID_TICKS - 1,
+                    integer=True,
+                    min_n_ticks=1,
+                )
+            )
         ax.set_xlim(-0.75, nmax + 0.25)
-        ax.tick_params(axis="x", labelsize=TICK_LABEL_SIZE)
+        ax.tick_params(axis="x", **TICK_STYLE)
         _style_count_axis(ax)
         _annotate_panel(ax, _variable_annotation(variable, variable_labels))
 
@@ -707,6 +833,7 @@ def plot_nobs_by_wave(
     id_column: str | None = None,
     x_column: str | None = None,
     x_ticks: Sequence[float] | None = None,
+    line_marker: MarkerType | None = None,
     variable_labels: VariableLabels | None = None,
     xlabel: str = "Wave",
     ylabel: str = "Number of observations",
@@ -733,6 +860,8 @@ def plot_nobs_by_wave(
         column itself is used when omitted.
     x_ticks
         Optional explicit horizontal tick positions.
+    line_marker
+        Optional marker drawn at each plotted wave, such as ``"o"``.
     variable_labels
         Optional labels keyed by variable name.
     xlabel
@@ -745,6 +874,8 @@ def plot_nobs_by_wave(
     Written figure path.
     """
 
+    line_style: _LineStyle = COUNT_LINE_STYLE | {"marker": line_marker}
+
     def plot_panel(ax: Axes, variable: str) -> None:
         """Draw nonmissing counts for one variable."""
         df_stats = _nobs_by_wave(
@@ -754,15 +885,8 @@ def plot_nobs_by_wave(
             id_column=id_column,
             x_column=x_column,
         )
-        ax.plot(
-            df_stats["x"],
-            df_stats["nobs"],
-            color=COUNT_COLOR,
-            linewidth=COUNT_LINE_WIDTH,
-            marker=STATISTIC_MARKER,
-            markersize=MARKER_SIZE,
-        )
-        ax.grid(color=GRID_COLOR, linestyle=GRID_LINESTYLE)
+        ax.plot(df_stats["x"], df_stats["nobs"], **line_style)
+        ax.grid(axis="y", **GRID_STYLE)
         _style_x_axis(ax, df_stats["x"], x_ticks)
         _style_count_axis(ax)
         _annotate_panel(ax, _variable_annotation(variable, variable_labels))
@@ -786,12 +910,13 @@ def plot_stats_by_wave(
     suptitle: str,
     x_column: str | None = None,
     x_ticks: Sequence[float] | None = None,
+    line_marker: MarkerType | None = None,
     weight_column: str | None = None,
     variable_labels: VariableLabels | None = None,
     value_labels: ValueLabels | None = None,
     compact_variables: Collection[str] = (),
-    outlier_method: OutlierMethod = "none",
-    outlier_tails: OutlierTailConfig = "auto",
+    outlier_method: OutlierMethodConfig = OutlierMethod.NONE,
+    outlier_tails: OutlierTailConfig = OutlierTail.AUTO,
     outlier_tail_fraction: float = OUTLIER_TAIL_FRACTION,
     outlier_iqr_factor: float = OUTLIER_IQR_FACTOR,
     xlabel: str = "Wave",
@@ -816,6 +941,8 @@ def plot_stats_by_wave(
         column itself is used when omitted.
     x_ticks
         Optional explicit horizontal tick positions.
+    line_marker
+        Optional marker drawn at each plotted wave, such as ``"o"``.
     weight_column
         Optional positive survey-weight column used for every statistic.
     variable_labels
@@ -825,8 +952,9 @@ def plot_stats_by_wave(
     compact_variables
         Variables whose axes use compact magnitude suffixes.
     outlier_method
-        Mean-trimming method. Median and interquartile ranges always use the
-        full valid sample.
+        Global mean-trimming method or methods keyed by variable. Missing
+        mapping entries disable trimming. Median and interquartile ranges
+        always use the full valid sample.
     outlier_tails
         Global tail rule or per-variable tail rules. Missing mapping entries
         use automatic inference.
@@ -845,9 +973,12 @@ def plot_stats_by_wave(
     Written figure path.
     """
     logger = logging.getLogger("PLOTS")
+    median_style: _LineStyle = MEDIAN_STYLE | {"marker": line_marker}
+    mean_style: _LineStyle = MEAN_STYLE | {"marker": line_marker}
 
     def plot_panel(ax: Axes, variable: str) -> None:
         """Draw descriptive statistics for one variable."""
+        method = _resolve_outlier_method(variable, outlier_method)
         df_stats, n_masked, tails = _stats_by_wave(
             df_data,
             variable,
@@ -855,16 +986,16 @@ def plot_stats_by_wave(
             x_column=x_column,
             weight_column=weight_column,
             value_labels=value_labels,
-            outlier_method=outlier_method,
+            outlier_method=method,
             outlier_tails=outlier_tails,
             outlier_tail_fraction=outlier_tail_fraction,
             outlier_iqr_factor=outlier_iqr_factor,
         )
-        if outlier_method != "none":
+        if method is not OutlierMethod.NONE:
             logger.info(
                 "Mean trimming for %s (%s, %s): %d rows masked",
                 variable,
-                outlier_method,
+                method,
                 tails,
                 n_masked,
             )
@@ -875,39 +1006,19 @@ def plot_stats_by_wave(
         q1 = df_stats["q1"].to_numpy(dtype=np.float64)
         q3 = df_stats["q3"].to_numpy(dtype=np.float64)
 
-        ax.fill_between(
-            x,
-            q1,
-            q3,
-            color=IQR_COLOR,
-            alpha=IQR_ALPHA,
-            linewidth=IQR_LINE_WIDTH,
-        )
-        ax.plot(
-            x,
-            median,
-            color=MEDIAN_COLOR,
-            linewidth=MEDIAN_LINE_WIDTH,
-            marker=STATISTIC_MARKER,
-            markersize=MARKER_SIZE,
-            alpha=MEDIAN_ALPHA,
-            zorder=MEDIAN_ZORDER,
-        )
-        ax.plot(
-            x,
-            mean,
-            color=MEAN_COLOR,
-            linewidth=MEAN_LINE_WIDTH,
-            marker=STATISTIC_MARKER,
-            markersize=MARKER_SIZE,
-            alpha=MEAN_ALPHA,
-            zorder=MEAN_ZORDER,
-        )
+        ax.fill_between(x, q1, q3, **IQR_STYLE)
+        ax.plot(x, median, **median_style)
+        ax.plot(x, mean, **mean_style)
         _style_x_axis(ax, x, x_ticks)
+        plotted = np.concatenate((mean, median, q1, q3))
+        plotted = plotted[np.isfinite(plotted)]
+        plotted_range = float(np.ptp(plotted)) if plotted.size else 0.0
+
         labels = None if value_labels is None else value_labels.get(variable)
         _style_stat_axis(
             ax,
             df_data[variable],
+            plotted_range=plotted_range,
             value_labels=labels,
             compact=variable in compact_variables,
         )
@@ -919,6 +1030,7 @@ def plot_stats_by_wave(
         plot_panel,
         suptitle=suptitle,
         descriptive_legend=True,
+        legend_line_marker=line_marker,
         xlabel=xlabel,
         ylabel=ylabel,
     )

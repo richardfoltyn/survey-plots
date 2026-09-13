@@ -6,8 +6,11 @@ project or copied verbatim into another project.
 
 The library supports longitudinal and repeated cross-section surveys, optional
 survey weights, distinct-case counts, datetime or numeric waves, and configurable
-mean trimming. All visual settings are module-level constants near the top of
-`plots.py`.
+mean trimming. Rendering styles are fixed in the canonical module so vendored
+copies produce consistent output.
+
+See [`API.md`](API.md) for the supported public interface, data requirements, and
+usage examples.
 
 ## Development
 
@@ -20,5 +23,5 @@ uv run ty check src/plots.py tests
 
 ## License
 
-This project is licensed under the GNU Lesser General Public License, version 3.
-See [`LICENSE.txt`](LICENSE.txt) for the full license text.
+This project is licensed under the GNU Lesser General Public License, version 3
+or later. See [`LICENSE.txt`](LICENSE.txt) for the full license text.

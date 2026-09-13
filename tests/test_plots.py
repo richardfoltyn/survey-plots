@@ -106,8 +106,8 @@ def test_wave_coordinate_can_differ_from_group_identifier() -> None:
         x_column="date",
         weight_column=None,
         value_labels=None,
-        outlier_method="none",
-        outlier_tails="auto",
+        outlier_method=plots.OutlierMethod.NONE,
+        outlier_tails=plots.OutlierTail.AUTO,
         outlier_tail_fraction=0.01,
         outlier_iqr_factor=100.0,
     )
@@ -131,13 +131,13 @@ def test_quantile_trimming_removes_only_the_applicable_tail_from_mean() -> None:
         x_column=None,
         weight_column=None,
         value_labels=None,
-        outlier_method="quantile",
-        outlier_tails="auto",
+        outlier_method=plots.OutlierMethod.QUANTILE,
+        outlier_tails=plots.OutlierTail.AUTO,
         outlier_tail_fraction=0.01,
         outlier_iqr_factor=100.0,
     )
 
-    assert tails == "upper"
+    assert tails is plots.OutlierTail.UPPER
     assert n_masked == 1
     assert df_stats.loc[0, "mean"] == pytest.approx(50.5)
     assert df_stats.loc[0, "q3"] == np.quantile(values, 0.75)
@@ -155,8 +155,8 @@ def test_tail_overrides_allow_integer_valued_magnitudes() -> None:
         x_column=None,
         weight_column=None,
         value_labels=None,
-        outlier_method="quantile",
-        outlier_tails="auto",
+        outlier_method=plots.OutlierMethod.QUANTILE,
+        outlier_tails=plots.OutlierTail.AUTO,
         outlier_tail_fraction=0.01,
         outlier_iqr_factor=100.0,
     )
@@ -167,15 +167,15 @@ def test_tail_overrides_allow_integer_valued_magnitudes() -> None:
         x_column=None,
         weight_column=None,
         value_labels=None,
-        outlier_method="quantile",
-        outlier_tails={"value": "upper"},
+        outlier_method=plots.OutlierMethod.QUANTILE,
+        outlier_tails={"value": plots.OutlierTail.UPPER},
         outlier_tail_fraction=0.01,
         outlier_iqr_factor=100.0,
     )
 
-    assert automatic_tails == "none"
+    assert automatic_tails is plots.OutlierTail.NONE
     assert automatic_count == 0
-    assert overridden_tails == "upper"
+    assert overridden_tails is plots.OutlierTail.UPPER
     assert overridden_count == 1
 
 
@@ -187,24 +187,24 @@ def test_iqr_trimming_is_scale_invariant_and_ignores_zero_iqr() -> None:
     mask = plots._mean_outlier_mask(
         values,
         None,
-        method="iqr",
-        tails="upper",
+        method=plots.OutlierMethod.IQR,
+        tails=plots.OutlierTail.UPPER,
         tail_fraction=0.01,
         iqr_factor=3.0,
     )
     scaled_mask = plots._mean_outlier_mask(
         scaled,
         None,
-        method="iqr",
-        tails="upper",
+        method=plots.OutlierMethod.IQR,
+        tails=plots.OutlierTail.UPPER,
         tail_fraction=0.01,
         iqr_factor=3.0,
     )
     zero_iqr_mask = plots._mean_outlier_mask(
         np.array([1.0, 1.0, 1.0, 100.0]),
         None,
-        method="iqr",
-        tails="upper",
+        method=plots.OutlierMethod.IQR,
+        tails=plots.OutlierTail.UPPER,
         tail_fraction=0.01,
         iqr_factor=3.0,
     )
@@ -232,8 +232,8 @@ def test_grid_uses_bold_italic_suptitle(monkeypatch: pytest.MonkeyPatch) -> None
     title = next(
         text for text in figures[0].texts if text.get_text() == "Diagnostic title"
     )
-    assert title.get_fontweight() == plots.FIGURE_TITLE_WEIGHT
-    assert title.get_fontstyle() == plots.FIGURE_TITLE_STYLE
+    assert title.get_fontweight() == plots.FIGURE_TITLE_STYLE["fontweight"]
+    assert title.get_fontstyle() == plots.FIGURE_TITLE_STYLE["fontstyle"]
 
 
 def test_public_plot_functions_write_files_and_close_figures(tmp_path: Path) -> None:
