@@ -1,0 +1,55 @@
+[project]
+name = "survey-plots"
+version = "0.1.0"
+description = "Vendored diagnostic plots for longitudinal and repeated cross-section surveys"
+readme = "README.md"
+requires-python = "==3.14.*"
+dependencies = [
+    "matplotlib>=3.11,<3.12",
+    "numpy>=2.5,<2.6",
+    "pandas>=3.0,<3.1",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["plots"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py314"
+fix = true
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.ruff.lint]
+extend-select = ["F401", "F541", "I", "B", "C4", "SIM", "UP", "RUF"]
+allowed-confusables = ["–", "’"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ty.environment]
+extra-paths = ["src"]
+
+[dependency-groups]
+dev = [
+    "pandas-stubs>=3.0,<3.1",
+    "pytest>=9.1,<10",
+    "pytest-xdist>=3.6,<4",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src"]
