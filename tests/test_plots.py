@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,6 +43,23 @@ def test_suffix_formatter_compacts_large_magnitudes() -> None:
     assert formatter(-2_500_000_000.0, 0) == "$-$2.5bn"
     assert formatter(1_000_000_000_000.0, 0) == "1tr"
     assert plots.SuffixFormatter(default=".2f")(12.5, 0) == "12.50"
+
+
+def test_isolated_point_mask_finds_only_points_without_valid_neighbors() -> None:
+    """Find boundary and internal singletons while excluding valid runs."""
+    cases = (
+        ([], []),
+        ([True], [True]),
+        ([False], [False]),
+        ([True, True], [False, False]),
+        ([True, False], [True, False]),
+        ([False, True], [False, True]),
+        ([True, False, True], [True, False, True]),
+    )
+
+    for valid, expected in cases:
+        mask = plots._isolated_point_mask(np.array(valid, dtype=bool))
+        np.testing.assert_array_equal(mask, expected)
 
 
 def test_weighted_moments_drop_invalid_weights_and_aligned_values() -> None:
@@ -234,6 +252,60 @@ def test_grid_uses_bold_italic_suptitle(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert title.get_fontweight() == plots.FIGURE_TITLE_STYLE["fontweight"]
     assert title.get_fontstyle() == plots.FIGURE_TITLE_STYLE["fontstyle"]
+
+
+def test_stats_plot_draws_isolated_points_and_iqr_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Draw markers and vertical IQR ranges for isolated valid waves."""
+    figures: list[Figure] = []
+
+    def capture_figure(fig: Figure, *_args: object, **_kwargs: object) -> None:
+        figures.append(fig)
+
+    monkeypatch.setattr(Figure, "savefig", capture_figure)
+    df_data = pd.DataFrame(
+        {
+            "wave": [1, 1, 1, 2, 2, 2, 3, 3, 3],
+            "value": [0.0, 1.0, 8.0, np.nan, np.nan, np.nan, 10.0, 11.0, 18.0],
+        }
+    )
+
+    plots.plot_stats_by_wave(
+        df_data,
+        ["value"],
+        Path("unused.pdf"),
+        wave_column="wave",
+        suptitle="Statistics",
+    )
+
+    panel = figures[0].axes[1]
+    isolated_lines = [
+        line for line in panel.lines if line.get_marker() == plots.ISOLATED_POINT_MARKER
+    ]
+    assert len(isolated_lines) == 2
+    np.testing.assert_allclose(
+        [line.get_xdata() for line in isolated_lines],
+        [[1, 3], [1, 3]],
+    )
+    np.testing.assert_allclose(
+        [line.get_ydata() for line in isolated_lines],
+        [[1, 11], [3, 13]],
+    )
+
+    iqr_lines = [
+        collection
+        for collection in panel.collections
+        if isinstance(collection, LineCollection)
+    ]
+    assert len(iqr_lines) == 1
+    np.testing.assert_allclose(
+        iqr_lines[0].get_segments(),
+        [
+            [[1, 0.5], [1, 4.5]],
+            [[3, 10.5], [3, 14.5]],
+        ],
+    )
 
 
 def test_public_plot_functions_write_files_and_close_figures(tmp_path: Path) -> None:

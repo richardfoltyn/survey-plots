@@ -162,10 +162,23 @@ MEAN_STYLE: _LineStyle = MEAN_LINE_STYLE | {
     "alpha": 0.7,
     "zorder": 100,
 }
+ISOLATED_POINT_MARKER: MarkerType = "o"
+ISOLATED_POINT_MARKER_SIZE = 3.5
+ISOLATED_POINT_STYLE: _LineStyle = {
+    "linestyle": "none",
+    "marker": ISOLATED_POINT_MARKER,
+    "markersize": ISOLATED_POINT_MARKER_SIZE,
+}
 IQR_STYLE: _FillStyle = {
     "color": "steelblue",
     "alpha": 0.25,
     "linewidth": 0.0,
+}
+IQR_LINE_STYLE: _LineStyle = {
+    "color": "steelblue",
+    "alpha": IQR_STYLE["alpha"],
+    "linewidth": 1.5,
+    "zorder": 20,
 }
 IQR_LEGEND_STYLE: _PatchStyle = {
     "facecolor": "steelblue",
@@ -462,6 +475,16 @@ def _mean_outlier_mask(
     if method is OutlierMethod.QUANTILE:
         return _quantile_outlier_mask(values, weights, tails, tail_fraction)
     return _iqr_outlier_mask(values, weights, tails, iqr_factor)
+
+
+def _isolated_point_mask(
+    valid: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.bool_]:
+    """Identify valid points without valid immediate neighbors."""
+    isolated = valid.copy()
+    isolated[1:] &= ~valid[:-1]
+    isolated[:-1] &= ~valid[1:]
+    return isolated
 
 
 def _wave_coordinate(
@@ -1009,6 +1032,32 @@ def plot_stats_by_wave(
         ax.fill_between(x, q1, q3, **IQR_STYLE)
         ax.plot(x, median, **median_style)
         ax.plot(x, mean, **mean_style)
+
+        iqr_isolated = _isolated_point_mask(np.isfinite(q1) & np.isfinite(q3))
+        if np.any(iqr_isolated):
+            ax.vlines(
+                x[iqr_isolated],
+                q1[iqr_isolated],
+                q3[iqr_isolated],
+                colors=IQR_LINE_STYLE["color"],
+                alpha=IQR_LINE_STYLE["alpha"],
+                linewidth=IQR_LINE_STYLE["linewidth"],
+                zorder=IQR_LINE_STYLE["zorder"],
+            )
+
+        if line_marker is None:
+            for values, style in (
+                (median, median_style),
+                (mean, mean_style),
+            ):
+                isolated = _isolated_point_mask(np.isfinite(values))
+                if np.any(isolated):
+                    ax.plot(
+                        x[isolated],
+                        values[isolated],
+                        **(style | ISOLATED_POINT_STYLE),
+                    )
+
         _style_x_axis(ax, x, x_ticks)
         plotted = np.concatenate((mean, median, q1, q3))
         plotted = plotted[np.isfinite(plotted)]
